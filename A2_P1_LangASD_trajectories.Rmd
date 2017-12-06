@@ -1,0 +1,206 @@
+---
+title: "Assignment 1 - Language Development in ASD - part 2"
+author: "Riccardo Fusaroli"
+date: "July 7, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("~/Documents/Experimental Methods III/Assignment_1")
+library(tidyverse)
+library(stringr)
+library(lme)
+library(ggplot2)
+
+da <- read.csv("Autism_data.csv", sep = ",")
+```
+
+# Language development in Autism Spectrum Disorder (ASD)
+
+Background: Autism Spectrum Disorder is often related to language impairment. However, this phenomenon has not been empirically traced in detail: i) relying on actual naturalistic language production, ii) over extended periods of time. We therefore videotaped circa 30 kids with ASD and circa 30 comparison kids (matched by linguistic performance at visit 1) for ca. 30 minutes of naturalistic interactions with a parent. We repeated the data collection 6 times per kid, with 4 months between each visit. We transcribed the data and counted: 
+i) the amount of words that each kid uses in each video. Same for the parent.
+ii) the amount of unique words that each kid uses in each video. Same for the parent.
+iii) the amount of morphemes per utterance (Mean Length of Utterance) displayed by each child in each video. Same for the parent. 
+
+This data is in the file you prepared in the previous class. 
+
+NB. A few children have been excluded from your datasets. We will be using them next week to evaluate how good your models are in assessing the linguistic development in new participants.
+
+We then want to test the language trajectory of child and parent over time.
+
+This Markdown is structured in the following way:
+
+1. The exercises: read them carefully. Under each exercise you will have to write your answers, once you have written and run the code. This is the part that you have to directly send to the teachers.
+2. An (optional) guided template full of hints for writing the code to solve the exercises. Fill in the code and the paragraphs as required. Then report your results under the exercise part.
+3. In exercise 4 you will be asked to create the best possible model of language development in TD and ASD children, picking and choosing whatever additional variables you want from the dataset. Next time, the models produced by the different groups will compete against each other to see who can produce the best model, so choose carefully!
+
+You will have to have a github repository for the code and send the answers to Celine and Riccardo without code (but a link to your github repository). This way we can check your code, but you are also forced to figure out how to report your analyses :-)
+
+N.B. The following lines are a summary of the questions to be answered, the step-by-step instructions and tips are below.
+
+## Exercise 1) Preliminary Data Exploration
+
+Describe the participant samples in the dataset (e.g. by diagnosis, age, etc.). Do you think the two groups are well balanced? If not, what do you think was the reason?
+
+```{R}
+
+library(data.table)
+setnames(da, "ADOS.y", "ADOS")
+setnames(da, "nonVerbalIQ.y","nonVerbalIQ")
+setnames(da, "VerbalIQ.y", "VerbalIQ")
+
+summary(lm(Age~Diagnosis, da)) #use lm because Age is a continuous variable
+summary(glm(Gender~Diagnosis, family = binomial, da)) #Use glm because Gender is not a continuous variable
+#Significant difference in age (-12,5 months for TD children) - the age difference make good sense, as the participants are matched on VerbalIQ at the first visit -  ASD children will have the same VerbalIQ and TD children at a later age. 
+#Gender balance seems good across groups 
+
+lm_da = filter(da, VISIT==1)
+summary(lm(VerbalIQ~Diagnosis, lm_da))
+summary(lm(nonVerbalIQ~Diagnosis, lm_da))
+
+by(da, da$Diagnosis, summary) #Alternative solution
+#number of particiapnt and gender balance seems fine
+#TD age =  30 months vs 43 months
+
+```
+
+### Exercise 2) Children learning language: the effects of time and ASD
+Describe linguistic development in TD and ASD children in terms of Mean Length of Utterance (MLU)?
+
+```{R}
+library(lme4)
+install.packages("lmerTest")
+library(lmerTest)
+null = lmer(CHI_MLU~1+(1+VISIT|SUBJ), da)
+chi_time = lmer(CHI_MLU~1+VISIT+(1+VISIT|SUBJ), da)
+chi_time_diag = lmer(CHI_MLU~1+VISIT+Diagnosis + (1+VISIT|SUBJ), da)
+chi_time_diag_int = lmer(CHI_MLU~1+VISIT*Diagnosis + (1+VISIT|SUBJ), da)
+
+summary(chi_time)
+summary(chi_time_diag)
+summary(chi_time_diag_int)
+
+anova(null, chi_time, chi_time_diag, chi_time_diag_int )
+
+ggplot(da, aes(VISIT, CHI_MLU, color = Diagnosis))+
+  geom_point()+ 
+  geom_smooth()
+
+#The best model according to the anova comparison is the one including the interaction effect between diagnosis and visist. 
+#It it significantly better with a p-value <.001, and it has the lowest AIC value. 
+#MLU increases by 0.25 more per visit for TD children than for ASD children
+
+#Checking whether a growth curve model is better (including polynomials)
+#Using 2nd order polynomial
+growth_curve_2 = lmer(CHI_MLU~1+poly(VISIT,2)*Diagnosis + (1+VISIT|SUBJ), da)
+
+#Using 3rd order polynomial 
+growth_curve_3 = lmer(CHI_MLU~1+poly(VISIT,3)*Diagnosis + (1+VISIT|SUBJ), da)
+
+growth_curve_4 = lmer(CHI_MLU~1+poly(VISIT,4)*Diagnosis + (1+VISIT|SUBJ), da)
+
+anova(chi_time_diag_int, growth_curve_2, growth_curve_3, growth_curve_4)
+#The model using 3rd order polynomial is significantly better than the other models with a p-value 0.006. 
+
+```
+
+
+### Exercise 3) Child directed speech as a moving target
+Describe how parental use of language changes over time in terms of MLU. What do you think is going on?
+
+```{R}
+null_2 = lmer(MOT_MLU~1+(1+VISIT|SUBJ), da)
+mot_time = lmer(MOT_MLU~1+VISIT+(1+VISIT|SUBJ), da)
+mot_time_diag = lmer(MOT_MLU~1+VISIT + Diagnosis + (1+VISIT|SUBJ), da)
+mot_time_diag_int = lmer(MOT_MLU~1+VISIT*Diagnosis + (1+VISIT|SUBJ), da)
+
+anova(null_2, mot_time, mot_time_diag, mot_time_diag_int)
+
+summary(mot_time)
+summary(mot_time_diag)
+#Generally mother MLU increases by 0.12 per visist
+#There is no effect of an interaction  between time and diagnosis of the children - there is a difference between diagnosis of the child, but the difference is constant
+#There is a constant differnece of MLU between mothers of children with TD and ASD - TD parents are 0.5 higher 
+
+ggplot(da, aes(VISIT, MOT_MLU, color = Diagnosis))+
+  geom_point()+ 
+  geom_smooth()
+
+```
+
+### Exercise 4) Looking into "individual differences" (demographic, clinical or cognitive profiles)
+The dataset contains some additional variables characterizing the kids’ cognitive and clinical profile: ADOS (autism severity), MSEL EL (Expressive Language, that is, verbal IQ, or linguistic skills at first visit as assessed by a psychologist using Mullen Scales of Early Learning), MSEL VR (Visual Reception, used as a proxy for non verbal IQ at first visit), Age, Gender, Ethnicity. Would it make sense to add any of them to your model of linguistic trajectories? Create the best possible model (the one that best explain the data, with MLU as outcome). Next time your model will be tested on new participants, and we will proclaim a winner. Describe your strategy to select the best models (how did you choose the variables to include?) and send the code to Riccardo and Celine.
+
+```{R}
+library("MuMIn")
+
+da$ADOS=as.integer(da$ADOS)
+
+m_null = lmer(CHI_MLU~1+(1+VISIT|SUBJ), da)
+
+m1 = lmer(CHI_MLU~1+VISIT+Gender+Diagnosis+ADOS+types_CHI+MOT_MLU+(1+VISIT|SUBJ), da)
+
+m2 = lmer(CHI_MLU~1+Gender+Diagnosis+ADOS+VISIT*types_CHI*MOT_MLU+(1+VISIT|SUBJ), da)
+
+m3 = lmer(CHI_MLU~MOT_MLU*types_CHI*VISIT+VerbalIQ+(1+VISIT|SUBJ), da)
+
+m4 = lmer(CHI_MLU~MOT_MLU*types_CHI*poly(VISIT,3)+VerbalIQ+(1+VISIT|SUBJ), da)
+
+m1
+m2
+m3
+
+anova(m1, m2, m3, m4)
+
+r.squaredGLMM(m1)
+r.squaredGLMM(m2)
+r.squaredGLMM(m3)
+r.squaredGLMM(m4)
+
+#Chose to include an interaction between MOT_MLU and types_CHI, because the above anlaysis, showed that parental MLU changes according to diagnosis. Furhter an interaction with VISIT was included, as we expect an interaction between time and MOT_MLU and types_CHI
+#The model thus includes both time, environmental factors (Mother MLU) and linguistic skills (VerbalIQ) - the clinical factors (Diagnosis, ADOS) was not included, as they covary with types_CHI which explains most of the same variance - hence they did not improve the model
+#I evaluated the performance of the models using the Likelihood Ratio Test - the probability of seeing the data given the model
+
+#In the anova comparison model 3 is significantly better. 
+#The AIC takes into account both the complexity of the model and the explained variance - it is lowest for model 3, indicating this is the best model. 
+#Model 4, which is model 3 only including a 3rd grade polynomial actually improves the model significantly, with a p-value of 0.002, and a fall in AIC value of approximately 2. 
+
+qqnorm(residuals(m3))
+qqnorm(residuals(m4))
+#Both model 3 and 4 meets the assumption of normality of residuals 
+
+```
+
+### [OPTIONAL] Exercise 5) Comment on how the three linguistic variables measure linguistic performance (the so-called "construct validity" of the measures). Do they express the same variance?
+
+```{R}
+
+
+```
+
+#FINAL ANSWERS TO THE FOUR EXERCISES - plain text
+Excercise 1): Characterize the participants 
+- The gender of participants with the diagnosis ASD vs. TD is equally balanced. Regarding the Age balance between the two groups, there is a slight difference in which participants with ASD are on average 12,5 months older than the typically developing participants. At the first visit, there is no significant difference between the nonverbal IQ of the two groups. Regarding verbal IQ, the typically developing children score on average 2.9 more than ASD children on the first visit, however the difference is not significant (p=0.07). 
+
+Exercise 2): Hypothesis: Children with ASD display a language impairment
+- A linear mixed effect model with an interaction between VISIT (time) and Diagnosis, performed significantly better than models containing only one of the predictors, or both of them without interaction, X2 = 35.1,  p<.001.
+- The model suggest that child MLU changes significantly over time according to diagnosis, with typically developing children generally increasing their MLU by 2.25 words more than ASD children pr. visit, beta=0.25, SE=0.04, p<.001. Thus the results indicate that children with ASD display a language impairment. 
+-  Including a third grade polynomial on VISIT improved the model significantly, X2=104, p=0.006. This supports the idea that MLU development will be greater earlier in children lives, while the development will gradually fade as the child gets older. 
+
+Exercise 3): Parents speak equally to children with ASD and TD
+- A linear mixed model predicting the parental MLU from VISIT (time) and diagnosis of the child was significantly better than a model including an interaction between VISIT and diagnosis, X2 = 16.7, p<.001. This suggests that any difference found in the parental MLU according to the diagnosis of the child is constant over time. 
+- The results indicate that parental MLU on average increases by 0.12 words pr. visit, beta=0.12, p<.001. Further, it suggest a difference in parental MLU according to the diagnosis of the child, in which parents of typically developing children on average have an MLU of 0.5 words more than parents of ASD children, beta=0.5, p<.001. This difference does not seem to increase over time. 
+
+Exercise 4): Looking into individual differences 
+- The model I suggest describes the data best looks as following: model = lmer(CHI_MLU~MOT_MLU*types_CHI*VISIT+VerbalIQ+(1+VISIT|SUBJ), da)
+- The model thus includes both time (which intuitively is important in a study of development), environmental factors (parental MLU) and linguistic skills (verbalIQ). The clinical factors (Diagnosis and ADOS) was not included as I found they corvaried heavily with the unique words the child produced (types_CHI), and therefore did not contribute with further explanation to improve the model. 
+- I chose to include an interaction between parental MLU and unique words, as the analysis in exercise 3 indicated a significant change in MLU according to diagnosis. Further these were included in an interaction with time, as the analysis from exercise 1 suggested a significant change over time of the child MLU, which I expect also counts for the amount of unique words. Further more, an anova comparison showed an improvement in the model by including this interaction effect. 
+- I evaluated the performance of the models using the Likelihood Ratio Test - the probability of seeing the data given the model. 
+- Additionally, the AIC value, which takes into account both the complexity of the model and the variance explained, was lowest for this model, indicating it to be the best to explain the data. 
+- Including a third grade polynomial on VISIT improved the model significantly, X2 = 21, p<.01.
+
+
+
+
+
